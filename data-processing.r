@@ -10,6 +10,22 @@ suppressPackageStartupMessages({
 # Config
 # -----------------------------
 
+args <- commandArgs(trailingOnly = TRUE)
+
+get_arg_value <- function(prefix) {
+  hit <- args[startsWith(args, prefix)]
+  if (length(hit) == 0) return(NA_character_)
+  sub(prefix, "", hit[[1]])
+}
+
+read_env_or_arg <- function(env_key, arg_prefix, default) {
+  arg_val <- get_arg_value(arg_prefix)
+  if (!is.na(arg_val) && nzchar(arg_val)) return(arg_val)
+  env_val <- Sys.getenv(env_key, "")
+  if (nzchar(env_val)) return(env_val)
+  return(default)
+}
+
 bbox <- list(
   west = 9.0723,
   east = 9.9565,
@@ -17,8 +33,8 @@ bbox <- list(
   north = 51.4261
 )
 
-rows <- 120
-cols <- 600
+rows <- as.integer(read_env_or_arg("RIDGE_ROWS", "--rows=", 120))
+cols <- as.integer(read_env_or_arg("RIDGE_COLS", "--cols=", 600))
 
 # For Germany, prefer ETRS89 / UTM zone 32N
 # Fallback: "EPSG:32632" (WGS84 UTM 32N)
@@ -30,8 +46,17 @@ dem_source <- "auto"
 # elevatr zoom level (only used if elevatr is selected)
 z_level <- 9
 
-# Smoothing
-apply_smoothing <- TRUE
+# Resampling / smoothing
+resample_method <- read_env_or_arg("RIDGE_RESAMPLE", "--resample=", "bilinear")
+smoothing_method <- read_env_or_arg("RIDGE_SMOOTH", "--smooth=", "none")
+gaussian_sigma <- as.numeric(read_env_or_arg("RIDGE_GAUSS_SIGMA", "--sigma=", 1.0))
+gaussian_radius <- as.integer(read_env_or_arg("RIDGE_GAUSS_RADIUS", "--radius=", 2))
+mean_radius <- as.integer(read_env_or_arg("RIDGE_MEAN_RADIUS", "--mean-radius=", 1))
+
+if (resample_method == "nearest") resample_method <- "near"
+if (!resample_method %in% c("bilinear", "near")) {
+  stop("resample_method must be 'bilinear' or 'near'.")
+}
 
 # If TRUE, flip row order to south->north
 flip_rows <- FALSE
@@ -43,13 +68,12 @@ clamp_percentiles <- list(low = 0.02, high = 1.0)
 # Output directory
 script_dir <- tryCatch(dirname(normalizePath(sys.frames()[[1]]$ofile)), error = function(e) NULL)
 cwd <- getwd()
-
-if (!is.null(script_dir) && basename(script_dir) == "R_data_processing") {
-  project_root <- normalizePath(file.path(script_dir, ".."))
+project_root <- if (!is.null(script_dir) && file.exists(file.path(script_dir, "static"))) {
+  normalizePath(script_dir)
 } else {
-  project_root <- normalizePath(cwd)
+  normalizePath(cwd)
 }
-output_dir <- file.path(project_root, "static", "data")
+output_dir <- read_env_or_arg("RIDGE_OUTPUT_DIR", "--out=", file.path(project_root, "static", "data"))
 
 # -----------------------------
 # Helpers
@@ -59,6 +83,19 @@ require_optional <- function(pkg) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
     stop(sprintf("Package '%s' is required but not installed.", pkg), call. = FALSE)
   }
+}
+
+gaussian_kernel_1d <- function(radius, sigma) {
+  if (radius < 1) return(matrix(1, nrow = 1, ncol = 1))
+  x <- seq(-radius, radius)
+  w <- exp(-(x^2) / (2 * sigma^2))
+  w / sum(w)
+}
+
+gaussian_kernel_2d <- function(radius, sigma) {
+  w1 <- gaussian_kernel_1d(radius, sigma)
+  kernel <- outer(w1, w1)
+  kernel / sum(kernel)
 }
 
 # -----------------------------
@@ -162,16 +199,34 @@ template <- terra::rast(
   crs = target_crs
 )
 
-grid <- terra::resample(dem_m, template, method = "bilinear")
+grid <- terra::resample(dem_m, template, method = resample_method)
 
 # -----------------------------
-# Optional smoothing
+# Optional smoothing (configurable)
 # -----------------------------
 
-if (apply_smoothing) {
-  message("Applying smoothing...")
-  kernel <- matrix(1, 3, 3) / 9
-  grid <- terra::focal(grid, w = kernel, fun = "mean", na.policy = "omit")
+if (smoothing_method != "none") {
+  message("Applying smoothing: ", smoothing_method)
+
+  if (smoothing_method == "mean2d") {
+    size <- mean_radius * 2 + 1
+    kernel <- matrix(1, size, size)
+    kernel <- kernel / sum(kernel)
+    grid <- terra::focal(grid, w = kernel, fun = "sum", na.policy = "omit")
+  } else if (smoothing_method == "gaussian2d") {
+    kernel <- gaussian_kernel_2d(gaussian_radius, gaussian_sigma)
+    grid <- terra::focal(grid, w = kernel, fun = "sum", na.policy = "omit")
+  } else if (smoothing_method == "gaussian1d_x") {
+    w1 <- gaussian_kernel_1d(gaussian_radius, gaussian_sigma)
+    kernel <- matrix(w1, nrow = 1)
+    grid <- terra::focal(grid, w = kernel, fun = "sum", na.policy = "omit")
+  } else if (smoothing_method == "gaussian1d_y") {
+    w1 <- gaussian_kernel_1d(gaussian_radius, gaussian_sigma)
+    kernel <- matrix(w1, ncol = 1)
+    grid <- terra::focal(grid, w = kernel, fun = "sum", na.policy = "omit")
+  } else {
+    warning("Unknown smoothing_method: ", smoothing_method, " (skipping)")
+  }
 }
 
 # -----------------------------
@@ -216,10 +271,18 @@ if (abs(p_high - p_low) < 1e-6) {
 # -----------------------------
 
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+message("Output directory: ", normalizePath(output_dir))
 
 # Values.bin: row-major order
 flat <- as.vector(t(mat))
 values_path <- file.path(output_dir, "values.bin")
+meta_path <- file.path(output_dir, "meta.json")
+manifest_path <- file.path(output_dir, "manifest.json")
+
+if (file.exists(values_path)) file.remove(values_path)
+if (file.exists(meta_path)) file.remove(meta_path)
+if (file.exists(manifest_path)) file.remove(manifest_path)
+
 writeBin(as.numeric(flat), values_path, size = 4, endian = "little")
 
 # Meta.json
@@ -252,14 +315,33 @@ meta <- list(
   clampValues = list(low = p_low, high = p_high),
   min = min_elev,
   max = max_elev,
+  filters = list(
+    resampleMethod = resample_method,
+    smoothingMethod = smoothing_method,
+    gaussian = list(radius = gaussian_radius, sigma = gaussian_sigma),
+    meanRadius = mean_radius
+  ),
   source = if (!is.null(attr(dem_ll, "source"))) attr(dem_ll, "source") else dem_source,
   createdAt = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
 )
 
-meta_path <- file.path(output_dir, "meta.json")
 jsonlite::write_json(meta, meta_path, auto_unbox = TRUE, pretty = TRUE)
+
+manifest <- list(
+  rows = rows,
+  cols = cols,
+  output_dir = normalizePath(output_dir),
+  createdAt = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+  resample_method = resample_method,
+  smoothing_method = smoothing_method,
+  gaussian = list(radius = gaussian_radius, sigma = gaussian_sigma),
+  mean_radius = mean_radius
+)
+
+jsonlite::write_json(manifest, manifest_path, auto_unbox = TRUE, pretty = TRUE)
 
 message("Done.")
 message("Wrote:")
 message("- ", values_path)
 message("- ", meta_path)
+message("- ", manifest_path)

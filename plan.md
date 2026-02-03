@@ -355,6 +355,71 @@ Ribbons are meshes, so line width limits do not apply.
 
 ---
 
+# Next Tasks Plan (Requested Changes)
+
+## 1) Fix: Rerun `data-processing.r` but outputs don’t change
+
+**Likely cause:** output path or overwrite behavior doesn’t match the “data” folder you’re inspecting.
+
+**Plan:**
+1. **Make output folder explicit and configurable**
+   - Add a top‑level `output_dir` config that defaults to `static/data`.
+   - Allow override via CLI arg (e.g. `--out=static/data`) or environment variable.
+2. **Log absolute output paths**
+   - Print the full path for `values.bin` and `meta.json` every run.
+3. **Write a run manifest**
+   - Write `static/data/manifest.json` with `rows`, `cols`, `createdAt`, filter settings.
+   - This makes it obvious if a re-run happened.
+4. **Force overwrite**
+   - `file.remove(values_path, meta_path)` before writing (optional).
+   - Write to a temp file then replace (prevents partial writes).
+
+**Success check:** `manifest.json` and `meta.json` show the new `rows` values and timestamp.
+
+---
+
+## 2) Switchable filters (bilinear / Gaussian / 1D smooth)
+
+**Goal:** choose resampling and smoothing without changing code.
+
+**Plan:**
+1. Add config flags in `data-processing.r`:
+   - `resample_method = "bilinear" | "nearest"`
+   - `smoothing_method = "none" | "gaussian2d" | "mean2d" | "gaussian1d_x" | "gaussian1d_y"`
+   - `gaussian_sigma` + `gaussian_radius`
+2. Implement options:
+   - **Resample:** `terra::resample(..., method = resample_method)`
+   - **Gaussian 2D:** `kernel <- terra::focalMat(grid, sigma, type="Gauss")` then `terra::focal(...)`
+   - **Mean 2D:** 3×3 or 5×5 uniform kernel
+   - **Gaussian 1D (X):** use a 1×N kernel
+   - **Gaussian 1D (Y):** use an N×1 kernel
+3. Store chosen filter settings in `meta.json` for traceability.
+
+**Success check:** toggling settings yields visibly smoother or more jagged ribbons.
+
+---
+
+## 3) Background + lighting (chart-like feel)
+
+**Goal:** match the soft, paper‑like look of `demo-threejs.png`.
+
+**Plan:**
+1. **Switch ribbon material to lit**
+   - Use `MeshLambertMaterial` (diffuse) or `MeshPhongMaterial` (slightly glossy).
+   - Keep `transparent: true`, `opacity: 0.2–0.4`, `side: DoubleSide`.
+2. **Add simple lights**
+   - `AmbientLight` (soft base, low intensity).
+   - One `DirectionalLight` to give gentle shading.
+3. **Lighten background**
+   - Change background to a light gray or soft blue.
+   - Optionally add subtle fog to push depth.
+4. **Palette tuning**
+   - Desaturate row gradient to match the reference (cool blues + a single accent).
+
+**Success check:** ribbons read as translucent filled areas rather than wireframes.
+
+---
+
 ## B8) Camera framing
 
 - Compute bounding box of all lines

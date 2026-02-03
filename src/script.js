@@ -5,21 +5,32 @@ const SETTINGS = {
   dataRoot: "./data",
   metersToUnits: 1 / 1000,
   depthScale: 1.0,
-  zScaleFactor: 0.15,
+  zScaleFactor: 0.18,
   ribbon: {
-    opacity: 0.28,
+    opacity: 1.8,
     baseHeight: 0,
     rowStep: 2,
     colStep: 1,
+    rowGap: 1.6, // new: >1 increases spacing
   },
-  background: "#0b0f1a",
+  background: "#f2f4f7",
+  fog: {
+    enabled: true,
+    near: 0.6,
+    far: 2.2,
+  },
+  lighting: {
+    ambient: 0.65,
+    directional: 0.7,
+    dirPosition: [6, -10, 12],
+  },
   colorMode: "row", // 'row' | 'height'
   trim: {
     rows: 10,
     cols: 10,
   },
   rowGradient: [
-    { t: 0.0, color: "##D75172" },
+    { t: 0.0, color: "#D75172" },
     { t: 0.5, color: "#EEA454" },
     { t: 0.75, color: "#D10263" },
     { t: 1.0, color: "#8C0E96" },
@@ -34,6 +45,9 @@ const canvas = document.querySelector("canvas.webgl");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SETTINGS.background);
+if (SETTINGS.fog.enabled) {
+  scene.fog = new THREE.Fog(SETTINGS.background, SETTINGS.fog.near, SETTINGS.fog.far);
+}
 
 const sizes = {
   width: window.innerWidth,
@@ -58,6 +72,16 @@ renderer.setSize(sizes.width, sizes.height);
 renderer.setPixelRatio(sizes.pixelRatio);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.setClearColor(SETTINGS.background);
+
+const ambientLight = new THREE.AmbientLight(0xffffff, SETTINGS.lighting.ambient);
+scene.add(ambientLight);
+
+const directionalLight = new THREE.DirectionalLight(
+  0xffffff,
+  SETTINGS.lighting.directional,
+);
+directionalLight.position.set(...SETTINGS.lighting.dirPosition);
+scene.add(directionalLight);
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
@@ -191,7 +215,11 @@ async function loadRidgelines() {
     clampHigh = Number.isFinite(meta?.max) ? meta.max : maxValue;
   }
 
-  if (!Number.isFinite(clampLow) || !Number.isFinite(clampHigh) || clampHigh <= clampLow) {
+  if (
+    !Number.isFinite(clampLow) ||
+    !Number.isFinite(clampHigh) ||
+    clampHigh <= clampLow
+  ) {
     clampLow = minValue;
     clampHigh = maxValue;
   }
@@ -232,7 +260,7 @@ async function loadRidgelines() {
   const dx = dxMeters * SETTINGS.metersToUnits;
   const dy = dyMeters * SETTINGS.metersToUnits * SETTINGS.depthScale;
   const dxStep = dx * colStep;
-  const dyStep = dy * rowStep;
+  const dyStep = dy * rowStep * SETTINGS.ribbon.rowGap;
 
   const width = (usedCols - 1) * dxStep;
   const depth = (usedRows - 1) * dyStep;
@@ -267,10 +295,7 @@ async function loadRidgelines() {
     const tRow = usedRows > 1 ? r / (usedRows - 1) : 0;
     const rowColor = sampleGradient(tRow, SETTINGS.rowGradient);
 
-    const yIndex =
-      meta.rowOrder === "north_to_south"
-        ? usedRows - 1 - r
-        : r;
+    const yIndex = meta.rowOrder === "north_to_south" ? usedRows - 1 - r : r;
     const y = yOffset + yIndex * dyStep;
 
     for (let c = 0; c < usedCols; c++) {
@@ -314,10 +339,11 @@ async function loadRidgelines() {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    geometry.computeVertexNormals();
 
     const material =
       heightMaterial ??
-      new THREE.MeshBasicMaterial({
+      new THREE.MeshLambertMaterial({
         color: rowColor,
         transparent: true,
         opacity: SETTINGS.ribbon.opacity,
@@ -339,6 +365,11 @@ async function loadRidgelines() {
   box.getCenter(center);
 
   const maxDim = Math.max(size.x, size.y, size.z, 1);
+
+  if (SETTINGS.fog.enabled && scene.fog) {
+    scene.fog.near = maxDim * SETTINGS.fog.near;
+    scene.fog.far = maxDim * SETTINGS.fog.far;
+  }
 
   camera.near = maxDim / 100;
   camera.far = maxDim * 20;

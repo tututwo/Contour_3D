@@ -1,0 +1,13 @@
+{
+  "rows": 80,
+  "cols": 400,
+  "output_dir": "/Users/gordontu/My Journey/Map/Contour_3D/static/data",
+  "createdAt": "2026-02-03T07:09:36Z",
+  "resample_method": "bilinear",
+  "smoothing_method": "gaussian2d",
+  "gaussian": {
+    "radius": 2,
+    "sigma": 1.2
+  },
+  "mean_radius": 1
+}
