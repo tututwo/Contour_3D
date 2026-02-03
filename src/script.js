@@ -22,11 +22,11 @@ const SETTINGS = {
     zoom: 1,
   },
   ribbon: {
-    opacity: 0.28,
+    opacity: 0.18,
     baseHeight: 0,
     rowStep: 2,
     colStep: 1,
-    rowGap: 1.6, // new: >1 increases spacing
+    rowGap: 2, // new: >1 increases spacing
   },
   background: "#f2f4f7",
   fog: {
@@ -63,10 +63,18 @@ const SETTINGS = {
     cols: 10,
   },
   rowGradient: [
-    { t: 0.0, color: "#D75172" },
-    { t: 0.5, color: "#EEA454" },
-    { t: 0.75, color: "#D10263" },
-    { t: 1.0, color: "#8C0E96" },
+    { t: 0.0, color: "#5C585F" },
+    { t: 0.09, color: "#2C217E" },
+    { t: 0.18, color: "#2B20C1" },
+    { t: 0.27, color: "#7F21A3" },
+    { t: 0.36, color: "#8A2484" },
+    { t: 0.45, color: "#AE338D" },
+    { t: 0.55, color: "#C94F75" },
+    { t: 0.64, color: "#ED874F" },
+    { t: 0.73, color: "#D1B85C" },
+    { t: 0.82, color: "#57CEC9" },
+    { t: 0.91, color: "#ADE1DE" },
+    { t: 1.0, color: "#E0E0DF" },
   ],
   heightGradient: {
     low: "#FA4CFB",
@@ -79,7 +87,11 @@ const canvas = document.querySelector("canvas.webgl");
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SETTINGS.background);
 if (SETTINGS.visual.useFog) {
-  scene.fog = new THREE.Fog(SETTINGS.background, SETTINGS.fog.near, SETTINGS.fog.far);
+  scene.fog = new THREE.Fog(
+    SETTINGS.background,
+    SETTINGS.fog.near,
+    SETTINGS.fog.far,
+  );
 }
 
 const sizes = {
@@ -96,8 +108,7 @@ const perspectiveCamera = new THREE.PerspectiveCamera(
 );
 const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
 
-let camera =
-  SETTINGS.cameraMode === "ortho" ? orthoCamera : perspectiveCamera;
+let camera = SETTINGS.cameraMode === "ortho" ? orthoCamera : perspectiveCamera;
 camera.up.set(0, 0, 1);
 scene.add(camera);
 
@@ -569,7 +580,9 @@ async function loadRidgelines() {
         const curve = new THREE.CatmullRomCurve3(points, false, "centripetal");
         const tubularSegments = Math.max(
           2,
-          Math.floor((usedCols - 1) * SETTINGS.stroke.tube.tubularSegmentsScale),
+          Math.floor(
+            (usedCols - 1) * SETTINGS.stroke.tube.tubularSegmentsScale,
+          ),
         );
         const radius = computeStrokeRadius(dxStep);
 

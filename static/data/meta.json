@@ -1,5 +1,5 @@
 {
-  "rows": 80,
+  "rows": 100,
   "cols": 400,
   "bbox_lonlat": {
     "west": 9.0723,
@@ -15,7 +15,7 @@
     "ymax": 5697633.1412
   },
   "dx": 154.7114,
-  "dy": 411.2434,
+  "dy": 328.9947,
   "rowOrder": "north_to_south",
   "rowMajor": true,
   "clampPercentiles": {
@@ -23,11 +23,11 @@
     "high": 1
   },
   "clampValues": {
-    "low": 155.2723,
-    "high": 740.7878
+    "low": 153.8174,
+    "high": 745.6072
   },
-  "min": 131.3762,
-  "max": 740.7878,
+  "min": 129.2038,
+  "max": 745.6072,
   "filters": {
     "resampleMethod": "bilinear",
     "smoothingMethod": "gaussian2d",
@@ -38,5 +38,5 @@
     "meanRadius": 1
   },
   "source": "auto",
-  "createdAt": "2026-02-03T07:09:36Z"
+  "createdAt": "2026-02-03T08:40:39Z"
 }
