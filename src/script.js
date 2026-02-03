@@ -7,6 +7,9 @@ import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { FXAAShader } from "three/addons/shaders/FXAAShader.js";
 import { VignetteShader } from "three/addons/shaders/VignetteShader.js";
 import { ColorCorrectionShader } from "three/addons/shaders/ColorCorrectionShader.js";
+import { Line2 } from "three/addons/lines/Line2.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 
 const SETTINGS = {
   dataRoot: "./data",
@@ -46,7 +49,13 @@ const SETTINGS = {
     color: "#000000",
     opacity: 1,
     zOffset: 0.01,
-    width: 1010,
+    width: 10,
+    mode: "tube", // "tube" | "line2" | "line"
+    tube: {
+      radius: 0.02,
+      radialSegments: 6,
+      tubularSegmentsScale: 1,
+    },
   },
   colorMode: "row", // 'row' | 'height'
   trim: {
@@ -120,6 +129,7 @@ let bloomPass = null;
 let colorPass = null;
 let vignettePass = null;
 let fxaaPass = null;
+let lineMaterial = null;
 
 const initPostProcessing = () => {
   if (!SETTINGS.post.enabled) return;
@@ -187,6 +197,21 @@ const updateOrthoFrustum = (size) => {
   orthoCamera.updateProjectionMatrix();
 };
 
+const computeStrokeRadius = (dxStep) => {
+  if (SETTINGS.stroke.mode !== "tube") return 0;
+
+  if (camera.isOrthographicCamera) {
+    const viewHeight =
+      (camera.top - camera.bottom) / Math.max(camera.zoom, 1e-6);
+    const pixelsPerUnit = sizes.height / Math.max(viewHeight, 1e-6);
+    const targetPixels = SETTINGS.stroke.width;
+    return targetPixels / Math.max(pixelsPerUnit, 1e-6);
+  }
+
+  const base = SETTINGS.stroke.tube.radius;
+  return base * dxStep;
+};
+
 window.addEventListener("resize", () => {
   sizes.width = window.innerWidth;
   sizes.height = window.innerHeight;
@@ -213,6 +238,13 @@ window.addEventListener("resize", () => {
     if (bloomPass) {
       bloomPass.resolution.set(sizes.width, sizes.height);
     }
+  }
+
+  if (lineMaterial) {
+    lineMaterial.resolution.set(
+      sizes.width * sizes.pixelRatio,
+      sizes.height * sizes.pixelRatio,
+    );
   }
 });
 
@@ -402,16 +434,32 @@ async function loadRidgelines() {
   const vertexCount = usedCols * 2;
   const indexCount = (usedCols - 1) * 6;
   const useUint32 = vertexCount > 65535;
-  const strokeMaterial = SETTINGS.stroke.enabled
-    ? new THREE.LineBasicMaterial({
+  let strokeMaterial = null;
+  if (SETTINGS.stroke.enabled) {
+    if (SETTINGS.stroke.mode === "line2") {
+      lineMaterial = new LineMaterial({
+        color: new THREE.Color(SETTINGS.stroke.color),
+        linewidth: SETTINGS.stroke.width,
+        transparent: true,
+        opacity: SETTINGS.stroke.opacity,
+        depthWrite: false,
+      });
+      lineMaterial.resolution.set(
+        sizes.width * sizes.pixelRatio,
+        sizes.height * sizes.pixelRatio,
+      );
+      strokeMaterial = lineMaterial;
+    } else {
+      strokeMaterial = new THREE.LineBasicMaterial({
         color: SETTINGS.stroke.color,
         linewidth: SETTINGS.stroke.width,
         transparent: true,
         opacity: SETTINGS.stroke.opacity,
         depthWrite: false,
-      })
-    : null;
-  if (strokeMaterial) strokeMaterial.toneMapped = false;
+      });
+      strokeMaterial.toneMapped = false;
+    }
+  }
 
   for (let r = 0; r < usedRows; r++) {
     const positions = new Float32Array(vertexCount * 3);
@@ -505,14 +553,63 @@ async function loadRidgelines() {
     linesGroup.add(ribbon);
 
     if (strokePositions && strokeMaterial) {
-      const strokeGeometry = new THREE.BufferGeometry();
-      strokeGeometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(strokePositions, 3),
-      );
-      const stroke = new THREE.Line(strokeGeometry, strokeMaterial);
-      stroke.renderOrder = r + 1;
-      linesGroup.add(stroke);
+      if (SETTINGS.stroke.mode === "tube") {
+        const points = [];
+        for (let i = 0; i < usedCols; i++) {
+          const i3 = i * 3;
+          points.push(
+            new THREE.Vector3(
+              strokePositions[i3 + 0],
+              strokePositions[i3 + 1],
+              strokePositions[i3 + 2],
+            ),
+          );
+        }
+
+        const curve = new THREE.CatmullRomCurve3(points, false, "centripetal");
+        const tubularSegments = Math.max(
+          2,
+          Math.floor((usedCols - 1) * SETTINGS.stroke.tube.tubularSegmentsScale),
+        );
+        const radius = computeStrokeRadius(dxStep);
+
+        const tubeGeometry = new THREE.TubeGeometry(
+          curve,
+          tubularSegments,
+          radius,
+          SETTINGS.stroke.tube.radialSegments,
+          false,
+        );
+
+        const tubeMaterial = new THREE.MeshBasicMaterial({
+          color: SETTINGS.stroke.color,
+          transparent: true,
+          opacity: SETTINGS.stroke.opacity,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          fog: SETTINGS.visual.useFog,
+        });
+        tubeMaterial.toneMapped = false;
+
+        const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+        tube.renderOrder = r + 1;
+        linesGroup.add(tube);
+      } else if (SETTINGS.stroke.mode === "line2") {
+        const lineGeometry = new LineGeometry();
+        lineGeometry.setPositions(strokePositions);
+        const line = new Line2(lineGeometry, strokeMaterial);
+        line.renderOrder = r + 1;
+        linesGroup.add(line);
+      } else {
+        const strokeGeometry = new THREE.BufferGeometry();
+        strokeGeometry.setAttribute(
+          "position",
+          new THREE.BufferAttribute(strokePositions, 3),
+        );
+        const stroke = new THREE.Line(strokeGeometry, strokeMaterial);
+        stroke.renderOrder = r + 1;
+        linesGroup.add(stroke);
+      }
     }
   }
 
@@ -545,6 +642,13 @@ async function loadRidgelines() {
     center.y - size.y * 1.2,
     center.z + size.z * 1.2,
   );
+
+  if (lineMaterial) {
+    lineMaterial.resolution.set(
+      sizes.width * sizes.pixelRatio,
+      sizes.height * sizes.pixelRatio,
+    );
+  }
 
   controls.target.copy(center);
   controls.update();
