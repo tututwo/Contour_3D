@@ -1,0 +1,33 @@
+{
+  "rows": 40,
+  "cols": 600,
+  "bbox_lonlat": {
+    "west": 9.0723,
+    "east": 9.9565,
+    "south": 51.134,
+    "north": 51.4261
+  },
+  "crs": "EPSG:25832",
+  "extent_meters": {
+    "xmin": 505024.7796,
+    "xmax": 566909.3365,
+    "ymin": 5664733.6704,
+    "ymax": 5697633.1412
+  },
+  "dx": 103.1409,
+  "dy": 822.4868,
+  "rowOrder": "north_to_south",
+  "rowMajor": true,
+  "clampPercentiles": {
+    "low": 0.02,
+    "high": 1
+  },
+  "clampValues": {
+    "low": 159.6955,
+    "high": 734.2461
+  },
+  "min": 133.3757,
+  "max": 734.2461,
+  "source": "auto",
+  "createdAt": "2026-02-03T06:20:01Z"
+}
