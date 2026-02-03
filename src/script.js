@@ -1,13 +1,25 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { FXAAShader } from "three/addons/shaders/FXAAShader.js";
+import { VignetteShader } from "three/addons/shaders/VignetteShader.js";
+import { ColorCorrectionShader } from "three/addons/shaders/ColorCorrectionShader.js";
 
 const SETTINGS = {
   dataRoot: "./data",
   metersToUnits: 1 / 1000,
   depthScale: 1.0,
   zScaleFactor: 0.18,
+  cameraMode: "ortho", // "ortho" | "perspective"
+  ortho: {
+    padding: 1.15,
+    zoom: 1,
+  },
   ribbon: {
-    opacity: 1.8,
+    opacity: 0.28,
     baseHeight: 0,
     rowStep: 2,
     colStep: 1,
@@ -15,14 +27,26 @@ const SETTINGS = {
   },
   background: "#f2f4f7",
   fog: {
-    enabled: true,
     near: 0.6,
     far: 2.2,
   },
-  lighting: {
-    ambient: 0.65,
-    directional: 0.7,
-    dirPosition: [6, -10, 12],
+  visual: {
+    useFog: false,
+    useLambert: false,
+  },
+  post: {
+    enabled: true,
+    bloom: { enabled: true, strength: 0.35, radius: 0.4, threshold: 0.85 },
+    color: { enabled: true, pow: [0.95, 0.95, 0.95], mul: [1.08, 1.08, 1.08] },
+    vignette: { enabled: true, offset: 1.0, darkness: 0.85 },
+    fxaa: { enabled: true },
+  },
+  stroke: {
+    enabled: true,
+    color: "#000000",
+    opacity: 1,
+    zOffset: 0.01,
+    width: 1010,
   },
   colorMode: "row", // 'row' | 'height'
   trim: {
@@ -45,7 +69,7 @@ const canvas = document.querySelector("canvas.webgl");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(SETTINGS.background);
-if (SETTINGS.fog.enabled) {
+if (SETTINGS.visual.useFog) {
   scene.fog = new THREE.Fog(SETTINGS.background, SETTINGS.fog.near, SETTINGS.fog.far);
 }
 
@@ -55,12 +79,16 @@ const sizes = {
   pixelRatio: Math.min(window.devicePixelRatio, 2),
 };
 
-const camera = new THREE.PerspectiveCamera(
+const perspectiveCamera = new THREE.PerspectiveCamera(
   35,
   sizes.width / sizes.height,
   0.1,
   1000,
 );
+const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+
+let camera =
+  SETTINGS.cameraMode === "ortho" ? orthoCamera : perspectiveCamera;
 camera.up.set(0, 0, 1);
 scene.add(camera);
 
@@ -72,31 +100,120 @@ renderer.setSize(sizes.width, sizes.height);
 renderer.setPixelRatio(sizes.pixelRatio);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.setClearColor(SETTINGS.background);
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.toneMappingExposure = 1;
 
-const ambientLight = new THREE.AmbientLight(0xffffff, SETTINGS.lighting.ambient);
-scene.add(ambientLight);
-
-const directionalLight = new THREE.DirectionalLight(
-  0xffffff,
-  SETTINGS.lighting.directional,
-);
-directionalLight.position.set(...SETTINGS.lighting.dirPosition);
-scene.add(directionalLight);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
+directionalLight.position.set(6, -10, 12);
+scene.add(ambientLight, directionalLight);
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.8;
+controls.enableRotate = true;
+controls.enableZoom = true;
+
+let composer = null;
+let renderPass = null;
+let bloomPass = null;
+let colorPass = null;
+let vignettePass = null;
+let fxaaPass = null;
+
+const initPostProcessing = () => {
+  if (!SETTINGS.post.enabled) return;
+
+  composer = new EffectComposer(renderer);
+  renderPass = new RenderPass(scene, camera);
+  composer.addPass(renderPass);
+
+  if (SETTINGS.post.bloom.enabled) {
+    bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(sizes.width, sizes.height),
+      SETTINGS.post.bloom.strength,
+      SETTINGS.post.bloom.radius,
+      SETTINGS.post.bloom.threshold,
+    );
+    composer.addPass(bloomPass);
+  }
+
+  if (SETTINGS.post.color.enabled) {
+    colorPass = new ShaderPass(ColorCorrectionShader);
+    colorPass.uniforms["powRGB"].value.set(
+      SETTINGS.post.color.pow[0],
+      SETTINGS.post.color.pow[1],
+      SETTINGS.post.color.pow[2],
+    );
+    colorPass.uniforms["mulRGB"].value.set(
+      SETTINGS.post.color.mul[0],
+      SETTINGS.post.color.mul[1],
+      SETTINGS.post.color.mul[2],
+    );
+    composer.addPass(colorPass);
+  }
+
+  if (SETTINGS.post.vignette.enabled) {
+    vignettePass = new ShaderPass(VignetteShader);
+    vignettePass.uniforms["offset"].value = SETTINGS.post.vignette.offset;
+    vignettePass.uniforms["darkness"].value = SETTINGS.post.vignette.darkness;
+    composer.addPass(vignettePass);
+  }
+
+  if (SETTINGS.post.fxaa.enabled) {
+    fxaaPass = new ShaderPass(FXAAShader);
+    fxaaPass.material.uniforms["resolution"].value.set(
+      1 / (sizes.width * sizes.pixelRatio),
+      1 / (sizes.height * sizes.pixelRatio),
+    );
+    composer.addPass(fxaaPass);
+  }
+};
+
+initPostProcessing();
+
+let framingData = null;
+
+const updateOrthoFrustum = (size) => {
+  const aspect = sizes.width / sizes.height;
+  const frustumHeight = Math.max(size.y, 1e-6) * SETTINGS.ortho.padding;
+  const frustumWidth = frustumHeight * aspect;
+
+  orthoCamera.left = -frustumWidth / 2;
+  orthoCamera.right = frustumWidth / 2;
+  orthoCamera.top = frustumHeight / 2;
+  orthoCamera.bottom = -frustumHeight / 2;
+  orthoCamera.zoom = SETTINGS.ortho.zoom;
+  orthoCamera.updateProjectionMatrix();
+};
 
 window.addEventListener("resize", () => {
   sizes.width = window.innerWidth;
   sizes.height = window.innerHeight;
   sizes.pixelRatio = Math.min(window.devicePixelRatio, 2);
 
-  camera.aspect = sizes.width / sizes.height;
-  camera.updateProjectionMatrix();
+  if (camera.isPerspectiveCamera) {
+    camera.aspect = sizes.width / sizes.height;
+    camera.updateProjectionMatrix();
+  } else if (camera.isOrthographicCamera && framingData) {
+    updateOrthoFrustum(framingData.size);
+  }
 
   renderer.setSize(sizes.width, sizes.height);
   renderer.setPixelRatio(sizes.pixelRatio);
+
+  if (composer) {
+    composer.setSize(sizes.width, sizes.height);
+    if (fxaaPass) {
+      fxaaPass.material.uniforms["resolution"].value.set(
+        1 / (sizes.width * sizes.pixelRatio),
+        1 / (sizes.height * sizes.pixelRatio),
+      );
+    }
+    if (bloomPass) {
+      bloomPass.resolution.set(sizes.width, sizes.height);
+    }
+  }
 });
 
 const linesGroup = new THREE.Group();
@@ -123,6 +240,7 @@ function createHeightMaterial({ zMin, zMax, colorLow, colorHigh, opacity }) {
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
+    toneMapped: false,
     uniforms: {
       zMin: { value: zMin },
       zMax: { value: zMax },
@@ -284,12 +402,25 @@ async function loadRidgelines() {
   const vertexCount = usedCols * 2;
   const indexCount = (usedCols - 1) * 6;
   const useUint32 = vertexCount > 65535;
+  const strokeMaterial = SETTINGS.stroke.enabled
+    ? new THREE.LineBasicMaterial({
+        color: SETTINGS.stroke.color,
+        linewidth: SETTINGS.stroke.width,
+        transparent: true,
+        opacity: SETTINGS.stroke.opacity,
+        depthWrite: false,
+      })
+    : null;
+  if (strokeMaterial) strokeMaterial.toneMapped = false;
 
   for (let r = 0; r < usedRows; r++) {
     const positions = new Float32Array(vertexCount * 3);
     const indices = useUint32
       ? new Uint32Array(indexCount)
       : new Uint16Array(indexCount);
+    const strokePositions = SETTINGS.stroke.enabled
+      ? new Float32Array(usedCols * 3)
+      : null;
 
     const dataRowIndex = rowIndices[r];
     const tRow = usedRows > 1 ? r / (usedRows - 1) : 0;
@@ -318,6 +449,13 @@ async function loadRidgelines() {
       positions[baseIndex * 3 + 0] = x;
       positions[baseIndex * 3 + 1] = y;
       positions[baseIndex * 3 + 2] = SETTINGS.ribbon.baseHeight;
+
+      if (strokePositions) {
+        const s3 = c * 3;
+        strokePositions[s3 + 0] = x;
+        strokePositions[s3 + 1] = y;
+        strokePositions[s3 + 2] = z + SETTINGS.stroke.zOffset;
+      }
     }
 
     for (let c = 0; c < usedCols - 1; c++) {
@@ -339,22 +477,43 @@ async function loadRidgelines() {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-    geometry.computeVertexNormals();
+    if (SETTINGS.visual.useLambert) geometry.computeVertexNormals();
 
     const material =
       heightMaterial ??
-      new THREE.MeshLambertMaterial({
-        color: rowColor,
-        transparent: true,
-        opacity: SETTINGS.ribbon.opacity,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        fog: true,
-      });
+      (SETTINGS.visual.useLambert
+        ? new THREE.MeshLambertMaterial({
+            color: rowColor,
+            transparent: true,
+            opacity: SETTINGS.ribbon.opacity,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            fog: SETTINGS.visual.useFog,
+          })
+        : new THREE.MeshBasicMaterial({
+            color: rowColor,
+            transparent: true,
+            opacity: SETTINGS.ribbon.opacity,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            fog: SETTINGS.visual.useFog,
+          }));
+    material.toneMapped = false;
 
     const ribbon = new THREE.Mesh(geometry, material);
     ribbon.renderOrder = r;
     linesGroup.add(ribbon);
+
+    if (strokePositions && strokeMaterial) {
+      const strokeGeometry = new THREE.BufferGeometry();
+      strokeGeometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(strokePositions, 3),
+      );
+      const stroke = new THREE.Line(strokeGeometry, strokeMaterial);
+      stroke.renderOrder = r + 1;
+      linesGroup.add(stroke);
+    }
   }
 
   // Frame the camera
@@ -366,9 +525,15 @@ async function loadRidgelines() {
 
   const maxDim = Math.max(size.x, size.y, size.z, 1);
 
-  if (SETTINGS.fog.enabled && scene.fog) {
+  framingData = { size: size.clone(), center: center.clone() };
+
+  if (SETTINGS.visual.useFog && scene.fog) {
     scene.fog.near = maxDim * SETTINGS.fog.near;
     scene.fog.far = maxDim * SETTINGS.fog.far;
+  }
+
+  if (camera.isOrthographicCamera) {
+    updateOrthoFrustum(size);
   }
 
   camera.near = maxDim / 100;
@@ -376,9 +541,9 @@ async function loadRidgelines() {
   camera.updateProjectionMatrix();
 
   camera.position.set(
-    center.x + size.x * 0.4,
-    center.y - size.y * 1.4,
-    center.z + size.z * 0.8,
+    center.x + size.x * 0.2,
+    center.y - size.y * 1.2,
+    center.z + size.z * 1.2,
   );
 
   controls.target.copy(center);
@@ -393,7 +558,11 @@ loadRidgelines().catch((error) => {
 
 const tick = () => {
   controls.update();
-  renderer.render(scene, camera);
+  if (composer) {
+    composer.render();
+  } else {
+    renderer.render(scene, camera);
+  }
   window.requestAnimationFrame(tick);
 };
 
