@@ -474,3 +474,69 @@ The “border” is likely caused by edge rows/cols being **flat or constant** d
 5. **Optional fade**  
    Apply an alpha fade at the row endpoints (left/right edges) to soften any
    remaining outline.
+
+
+# JS Refactor Plan (Script.js → Modules)
+
+## Summary
+Split `src/script.js` into focused modules (settings, scene setup, data load, geometry, materials, post-processing). Move inline shaders to `src/shaders/ribbon/`. Keep `main.js` as the entry point.
+
+## Proposed Folder Structure
+
+```
+src/
+  main.js                 // entry point (replaces script.js)
+  config/
+    settings.js           // SETTINGS object
+  core/
+    scene.js              // createScene()
+    camera.js             // createCamera(), frameCamera()
+    renderer.js           // createRenderer()
+    controls.js           // createControls()
+    lights.js             // addLights()
+    resize.js             // attachResizeHandler()
+  data/
+    loadTerrain.js        // fetch meta.json + values.bin
+    normalize.js          // clamp/percentile helpers
+  geometry/
+    ribbon.js             // buildRibbonMesh()
+    stroke.js             // buildStroke()
+  materials/
+    ribbonMaterial.js     // createRibbonMaterial()
+    strokeMaterial.js     // createStrokeMaterial()
+  post/
+    composer.js           // createComposer()
+  shaders/
+    ribbon/
+      height.vert.glsl    // moved from inline shader strings
+      height.frag.glsl    // moved from inline shader strings
+  utils/
+    gradient.js           // sampleGradient()
+    math.js               // computeQuantile(), helpers
+```
+
+## Shader Move (Required)
+- Inline GLSL in `script.js` becomes:
+  - `src/shaders/ribbon/height.vert.glsl`
+  - `src/shaders/ribbon/height.frag.glsl`
+- Import in `materials/ribbonMaterial.js` via Vite GLSL plugin.
+
+## Step-by-step Migration
+1. Create `config/settings.js` and move SETTINGS out of script.
+2. Split scene/camera/renderer/controls/lights into `core/`.
+3. Split data load + normalization into `data/`.
+4. Split ribbon/stroke generation into `geometry/`.
+5. Split materials into `materials/`, importing shaders.
+6. Split post-processing into `post/`.
+7. Replace `script.js` with `main.js` orchestrating the flow.
+8. Update `src/index.html` to load `main.js`.
+
+## Tests / Validation
+- App runs with same visuals.
+- Resize works.
+- Shader imports resolve.
+- Post-processing still enabled.
+
+## Assumptions
+- Vite GLSL plugin remains enabled.
+- No behavior changes, only refactor.
