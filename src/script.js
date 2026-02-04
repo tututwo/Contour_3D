@@ -46,7 +46,7 @@ const SETTINGS = {
   },
   stroke: {
     enabled: true,
-    color: "#000000",
+    color: "#ffffff",
     opacity: 1,
     zOffset: 0.01,
     width: 10,
